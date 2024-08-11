@@ -22,6 +22,9 @@ import org.springframework.web.client.RestTemplate;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.example.demo.Utils.DctkUtils.DCTK.coinAdd;
+
 @Service
 public class DctkService {
     private static boolean isRun = true;
@@ -30,7 +33,7 @@ public class DctkService {
     private static String urlToken = "https://api.dctk.me/api/login";
     private static String urlPlay = "https://api.dctk.me/api/user/join";
     private static String urlBalance = "https://api.dctk.me/api/user/balance-history?page=1&limit=20";
-    private static  String userName = "lecuong2201";
+    private static  String userName = "nenene";
     private static  String password = "Lecuong220120a@";
     private static String token = "";
     private static String to = "cutoongacteo@gmail.com";
@@ -135,7 +138,7 @@ public class DctkService {
         }
         if(Objects.equals(playSet.get(0), playWin.get(0))){
             countDC++;
-            return 300000;
+            return coinAdd;
         }
         return 0;
     }
@@ -147,7 +150,7 @@ public class DctkService {
         }
         if(Objects.equals(playSet.get(1), playWin.get(1))){
             countTK++;
-            return 300000;
+            return coinAdd;
         }
         return 0;
     }

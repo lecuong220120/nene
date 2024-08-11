@@ -6,6 +6,7 @@ public class DctkUtils {
         public static int C = 0;
         public static int T = 2;
         public static int K = 3;
-        public static int coin = 100000;
+        public static int coin = 300000;
+        public static int coinAdd = 350000;
     }
 }

@@ -54,6 +54,11 @@ public class DctkService {
     private static List<Integer> list16 = new ArrayList<>(Arrays.asList(3, 3, 3));
     //last play
     public static History history;
+    //historyPlay
+    public static List<Integer> historyPlay = new ArrayList<>();
+    public static List<Integer> historyWin = new ArrayList<>();
+    public static  Integer countDC = 0;
+    public static  Integer countTK = 0;
 
     public HistoryDTO getHistory(){
         ResponseEntity<HistoryDTO> response
@@ -68,6 +73,8 @@ public class DctkService {
     }
     public void autoPlay(){
         try{
+            Integer coinDc = 0;
+            Integer coinTk = 0;
             if(history != null){
                 Integer idPrev =  history.getId() + 1;
                 List<Balance> balances = getBalance().stream().
@@ -80,6 +87,8 @@ public class DctkService {
                         if(balance.getNote().indexOf("Trao thưởng phiên") != -1){
                             countSuccess++;
                             text = text + "Lần: "+ countSuccess + ", cảm ơn bạn: "+ balance.toString() + "\n";
+                        }else{
+                            text = text + "Lost: " + balance.toString() + "\n";
                         }
                     }
                     if (countSuccess ==0){
@@ -99,17 +108,50 @@ public class DctkService {
                     break;
                 }
             }
+
             List<Integer> listDC = histories.stream().map(History::getResult_cd).collect(Collectors.toList());
             List<Integer> listTK = histories.stream().map(History::getResult_tk).collect(Collectors.toList());
-            Integer playDC = preditionDCTK(listDC, true);
-            Integer playTk = preditionDCTK(listTK, false);
-            play(playDC, playTk);
+            historyWin.clear();
+            historyWin.add(listDC.get(0));
+            historyWin.add(listTK.get(0));
+            coinDc = changeCoinDC(historyPlay, historyWin);
+            coinTk = changeCoinTK(historyPlay, historyWin);
+            Integer playDC = preditionDCTK(listDC, true, historiesRes);
+            Integer playTk = preditionDCTK(listTK, false, historiesRes);
+            historyPlay.clear();
+            historyPlay.add(playDC);
+            historyPlay.add(playTk);
+            play(playDC, playTk, coinDc, coinTk);
         }catch (Exception e){
             System.out.printf("ERRORRRRRRRRRRRRRRR" + e);
         }
 
     }
-    public int preditionDCTK(List<Integer> listInteger, boolean isDC){
+    public Integer changeCoinDC(List<Integer> playSet, List<Integer> playWin){
+        if(CollectionUtils.isEmpty(playSet) || CollectionUtils.isEmpty(playWin)) return 0;
+        if(countDC == 1){
+            countDC = 0;
+            return 0;
+        }
+        if(Objects.equals(playSet.get(0), playWin.get(0))){
+            countDC++;
+            return 300000;
+        }
+        return 0;
+    }
+    public Integer changeCoinTK(List<Integer> playSet, List<Integer> playWin){
+        if(CollectionUtils.isEmpty(playSet) || CollectionUtils.isEmpty(playWin)) return 0;
+        if(countTK == 1){
+            countTK = 0;
+            return 0;
+        }
+        if(Objects.equals(playSet.get(1), playWin.get(1))){
+            countTK++;
+            return 300000;
+        }
+        return 0;
+    }
+    public int preditionDCTK(List<Integer> listInteger, boolean isDC, List<History> histories){
         if (isDC){
             if(listInteger.equals(list1)){
                 return DctkUtils.DCTK.C;
@@ -168,12 +210,12 @@ public class DctkService {
         }
         return response.getBody().getBalances();
     }
-    public void play(Integer dc, Integer tk){
+    public void play(Integer dc, Integer tk, Integer coinDC, Integer coinTK){
         try{
             //dc
-            DCTK dcApi = new DCTK(0, dc, DctkUtils.DCTK.coin, 4);
+            DCTK dcApi = new DCTK(0, dc, DctkUtils.DCTK.coin + coinDC, 4);
             //tk
-            DCTK tkApi = new DCTK(0, tk, DctkUtils.DCTK.coin, 4);
+            DCTK tkApi = new DCTK(0, tk, DctkUtils.DCTK.coin + coinTK, 4);
             ResponseDctk responseDc = callApi(dcApi);
             System.out.println("===================Response DC: " + responseDc.getMessage());
             Thread.sleep(15  * 1000);

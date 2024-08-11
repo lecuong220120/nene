@@ -133,6 +133,6 @@ public class Balance {
 
     @Override
     public String toString() {
-        return "Hien tai: =" + after +'\'';
+        return "Hien tai: =" + after + ", play = "+ change;
     }
 }

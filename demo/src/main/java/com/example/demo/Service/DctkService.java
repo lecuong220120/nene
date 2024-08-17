@@ -441,7 +441,7 @@ public class DctkService {
             }
             System.out.println(textDc);
             System.out.println(textTk);
-            text = text + textTk +"\n" + textDc +"\n";
+            text = text + textDc +"\n" + textTk +"\n";
             ResponseDctk responseDc = callApi(dcApi);
             System.out.println("===================Response DC: " + responseDc.getMessage());
             Thread.sleep(3 * 500);

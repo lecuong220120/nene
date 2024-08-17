@@ -3,24 +3,35 @@ package com.example.demo.Service;
 import com.example.demo.DTO.BalanceDTO;
 import com.example.demo.DTO.HistoryDTO;
 import com.example.demo.DTO.LoginDTO;
-import com.example.demo.Obj.Balance;
-import com.example.demo.Obj.DCTK;
-import com.example.demo.Obj.History;
-import com.example.demo.Obj.ResponseDctk;
+import com.example.demo.Obj.*;
 import com.example.demo.Utils.DctkUtils;
+import com.example.demo.websocket.WebSocketScraper;
 import jakarta.mail.*;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.java_websocket.client.WebSocketClient;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestTemplate;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.text.DecimalFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static com.example.demo.Utils.DctkUtils.DCTK.coinAdd;
@@ -57,21 +68,25 @@ public class DctkService {
     private static List<Integer> list16 = new ArrayList<>(Arrays.asList(3, 3, 3));
     //last play
     public static History history;
+    public static History historyBefore;
     //historyPlay
     public static List<Integer> historyPlay = new ArrayList<>();
     public static List<Integer> historyWin = new ArrayList<>();
     public static  Integer countDC = 0;
     public static  Integer countTK = 0;
-
+    //web socket
+    public static Map<Integer, Player> listMapPlayer = new HashMap<>();
     public HistoryDTO getHistory(){
         ResponseEntity<HistoryDTO> response
                 = restTemplate.getForEntity(url, HistoryDTO.class);
+        System.out.println("=======Call api get history");
         return  response.getBody();
     }
     public String getToken(){
         LoginDTO loginDTO = new LoginDTO(userName,  password);
         ResponseEntity<LoginDTO> response
                 = restTemplate.postForEntity(urlToken, loginDTO, LoginDTO.class);
+        System.out.println("=======Call api get token");
         return response.getBody().getJwt();
     }
     public void autoPlay(){
@@ -89,13 +104,13 @@ public class DctkService {
                     for (Balance balance : balances) {
                         if(balance.getNote().indexOf("Trao thưởng phiên") != -1){
                             countSuccess++;
-                            text = text + "Lần: "+ countSuccess + ", cảm ơn bạn: "+ balance.toString() + "\n";
+                            text = text + "Win: "+ countSuccess + ", cảm ơn bạn: "+ balance.toString() + "\n";
                         }else{
-                            text = text + "Lost: " + balance.toString() + "\n";
+                            text = text + "Tham gia: " + balance.toString() + "\n";
                         }
                     }
                     if (countSuccess ==0){
-                        text = "It's nothing";
+                        text = text + "==============> Failure";
                     }
                     System.out.println("======================" + text);
                     sendMail(text);
@@ -299,5 +314,231 @@ public class DctkService {
     }
     public void stop(){
         isRun = false;
+    }
+    public String getTimeCurrent(){
+        String url = "https://dctk.me/";
+        String time = null;
+        try {
+            String serviceUrl = "http://localhost:3000/fetch-html?url=" + java.net.URLEncoder.encode(url, "UTF-8");
+            String checkString = "<strong class=\"text-[#333333]\">Thời gian:</strong></div><div class=\"col-span-2 text-center\"><span class=\"text-[#333333]\">";
+            boolean check = true;
+            CloseableHttpClient httpClient = HttpClients.createDefault();
+            while (check){
+                try {
+                    HttpGet request = new HttpGet(serviceUrl);
+                    try (CloseableHttpResponse response = httpClient.execute(request)) {
+                        String html = EntityUtils.toString(response.getEntity());
+                        if(html.indexOf(checkString) != -1){
+                            time = html.substring(html.indexOf(checkString) + 121, html.indexOf(checkString) + 121 + 5);
+                            System.out.println("=========Time current:" + time);
+                            if(isDisConnect(client)){
+                                sendMail("Socket is disconnect. ReConnect socket");
+                                connectSocket();
+                            }
+                            if (!Objects.equals(time, "02:00") && !StringUtils.isEmpty(time)){
+                                List<History> historiesRes = getHistory().getHistories();
+                                historyBefore =  historiesRes.get(0);
+                                sycnMail(historiesRes);
+                                check = false;
+                            }
+                            Thread.sleep(500);
+                        }
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e);
+        }
+        return time;
+    }
+    public long convertToMilliseconds(String time) {
+        // Kiểm tra định dạng chuỗi thời gian
+        if (time == null || !time.matches("\\d{2}:\\d{2}")) {
+            throw new IllegalArgumentException("Invalid time format. Use 'mm:ss'.");
+        }
+
+        // Tách phút và giây
+        String[] parts = time.split(":");
+        int minutes = Integer.parseInt(parts[0]);
+        int seconds = Integer.parseInt(parts[1]);
+
+        // Chuyển đổi thành mili giây
+        long milliseconds = (minutes * 60 * 1000) + (seconds * 1000);
+
+        return milliseconds;
+    }
+    public static Long timeEnd = null;
+    public void playVersion2() throws InterruptedException {
+        while (isRun && getNewSession(true)){
+            Integer selectD = 0;
+            Integer selectC = 0;
+            Integer selectT = 0;
+            Integer selectK = 0;
+            Long timeCurrent = convertToMilliseconds(getTimeCurrent());
+            Long timeEnd = System.currentTimeMillis() + timeCurrent - (30 * 1000);
+            listMapPlayer = new HashMap<>();
+            while(System.currentTimeMillis() < timeEnd){
+                Thread.sleep(1000);
+            }
+            if(CollectionUtils.isEmpty(listMapPlayer)){
+                System.out.println("========playSet is empty");
+                continue;
+            }
+            List<Player> players = new ArrayList<>();
+            for (Map.Entry<Integer, Player> entry : listMapPlayer.entrySet()) {
+                players.add(entry.getValue());
+            }
+            System.out.println("====================Player size(): " + players.size());
+            for (int i =0; i < players.size(); i++){
+                if(players.get(i).getSelection() == DctkUtils.DCTK.D){
+                    selectD = selectD + players.get(i).getCoin();
+                }else if(players.get(i).getSelection() == DctkUtils.DCTK.C){
+                    selectC = selectC + players.get(i).getCoin();
+                }else if(players.get(i).getSelection() == DctkUtils.DCTK.T){
+                    selectT = selectT + players.get(i).getCoin();
+                }else if(players.get(i).getSelection() == DctkUtils.DCTK.K){
+                    selectK = selectK + players.get(i).getCoin();
+                }
+            }
+            DCTK dcApi;
+            DCTK tkApi;
+            boolean checkDC;
+            boolean checkTK;
+            //dc
+            if((selectD + DctkUtils.DCTK.coin) > (selectC + DctkUtils.DCTK.coin)){
+                checkDC = false;
+                dcApi = new DCTK(0, DctkUtils.DCTK.C, DctkUtils.DCTK.coin, 4);
+            }else if((selectD + DctkUtils.DCTK.coin) < (selectC + DctkUtils.DCTK.coin)){
+                checkDC = true;
+                dcApi = new DCTK(0, DctkUtils.DCTK.D, DctkUtils.DCTK.coin, 4);
+            }else{
+                continue;
+            }
+            //tk
+            if((selectT + DctkUtils.DCTK.coin) > (selectK + DctkUtils.DCTK.coin)){
+                checkTK = false;
+                tkApi = new DCTK(0, DctkUtils.DCTK.K, DctkUtils.DCTK.coin, 4);
+            }else if((selectT + DctkUtils.DCTK.coin) < (selectK + DctkUtils.DCTK.coin)){
+                checkTK = true;
+                tkApi = new DCTK(0, DctkUtils.DCTK.T, DctkUtils.DCTK.coin , 4);
+            }else{
+                continue;
+            }
+            text = "";
+            String textDc = "";
+            String textTk = "";
+            if(checkDC){
+                textDc = "D: Play D with " + formatNumber(selectD) + " < " + formatNumber(selectC) + ", chenh lech: " + formatNumber(selectC -selectD);
+            }else{
+                textDc = "C: Play C with " + formatNumber(selectC) + " < " + formatNumber(selectD) + ", chenh lech: " + formatNumber(selectD -selectC);
+            }
+            if(checkTK){
+                textTk = "T: Play T with " + formatNumber(selectT) + " < " + formatNumber(selectK) + ", chenh lech: " + formatNumber(selectK -selectT);
+            }else{
+                textTk = "K: Play K with " + formatNumber(selectK) + " < " + formatNumber(selectT) + ", chenh lech: " + formatNumber(selectT -selectK);
+            }
+            System.out.println(textDc);
+            System.out.println(textTk);
+            text = text + textTk +"\n" + textDc +"\n";
+            ResponseDctk responseDc = callApi(dcApi);
+            System.out.println("===================Response DC: " + responseDc.getMessage());
+            Thread.sleep(3 * 500);
+            ResponseDctk responseTk = callApi(tkApi);
+            System.out.println("===================Response TK: " + responseTk.getMessage());
+            listMapPlayer = new HashMap<>();
+        }
+    }
+    static SimpleDateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss");
+    public Boolean getNewSession(boolean isActive){
+        if(isActive){
+            try {
+                List<History> historiesRes = getHistory().getHistories();
+                String timeEnd = historiesRes.get(0).getStop();
+                Date date = formatter.parse(timeEnd);
+                if(System.currentTimeMillis() > date.getTime()){
+                    return true;
+                }
+                Thread.sleep(500);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return false;
+    }
+    public static String formatNumber(int number) {
+        DecimalFormat df;
+
+        if (number < 1000) {
+            // Không cần định dạng cho số nhỏ hơn 1000
+            return String.valueOf(number);
+        } else if (number < 1_000_000) {
+            // Định dạng với hàng nghìn
+            df = new DecimalFormat("#,###");
+        } else if (number < 1_000_000_000) {
+            // Định dạng với hàng triệu
+            df = new DecimalFormat("#,###.##M");
+            return df.format(number / 1_000_000.0);
+        } else {
+            // Định dạng với hàng tỷ
+            df = new DecimalFormat("#,###.##B");
+            return df.format(number / 1_000_000_000.0);
+        }
+
+        return df.format(number);
+    }
+    public static String text = "";
+    public void sycnMail(List<History> histories){
+        history = histories.get(0);
+        if(history != null){
+            Integer idPrev =  history.getId();
+            if(history.getResult_cd() == DctkUtils.DCTK.D){
+                text = text + "win ===> D " + "\n";
+            }else{
+                text = text + "win ===> C " + "\n";
+            }
+            if(history.getResult_tk() == DctkUtils.DCTK.T){
+                text = text + "win ===> T " + "\n";
+            }else{
+                text = text + "win ===> K " + "\n";
+            }
+            List<Balance> balances = getBalance().stream().
+                    filter(item -> item.getNote().indexOf(idPrev.toString()) != -1)
+                    .collect(Collectors.toList());
+            if(!CollectionUtils.isEmpty(balances)){
+                int countSuccess = 0;
+                for (Balance balance : balances) {
+                    if(balance.getNote().indexOf("Trao thưởng phiên") != -1){
+                        countSuccess++;
+                        text = text + "Win: "+ countSuccess + ", cảm ơn bạn: "+ balance.toString() + "\n";
+                    }else{
+                        text = text + "Tham gia: " + balance.toString() + "\n";
+                    }
+                }
+                if (countSuccess ==0){
+                    text = text + "==============> Failure";
+                }
+                System.out.println(text);
+                sendMail(text);
+                text = "";
+            }
+        }
+
+    }
+    private static WebSocketClient client = null;
+    public void connectSocket(){
+        URI uri = null;
+        try {
+            uri = new URI("wss://api.dctk.me/ws");
+            client = new WebSocketScraper(uri);
+            client.connect();
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+    }
+    public boolean isDisConnect(WebSocketClient webSocketClient){
+        if(webSocketClient.isClosed()) return true;
+        return false;
     }
 }
